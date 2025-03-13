@@ -1,0 +1,26 @@
+version: "3.9"
+services:
+  db:
+    image: mysql:8.0
+    container_name: mysql_linkedin_insights
+    ports:
+      - "3307:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: root_password
+      MYSQL_DATABASE: linkedin_insights_db
+      MYSQL_USER: app_user
+      MYSQL_PASSWORD: app_password
+    volumes:
+      - mysql_data:/var/lib/mysql
+
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+    environment:
+      DATABASE_URL: mysql+mysqlconnector://app_user:app_password@db:3306/linkedin_insights_db
+
+volumes:
+  mysql_data:

@@ -1,0 +1,8 @@
+fastapi
+uvicorn[standard]
+SQLAlchemy
+mysqlclient
+requests
+beautifulsoup4
+python-dotenv
+mysql-connector-python
