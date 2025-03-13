@@ -19,7 +19,7 @@ Base.metadata.create_all(bind=engine) # Create tables for testing
 app.dependency_overrides[get_db] = override_get_db
 
 def test_read_page_existing():
-    page_id = "deepsolv" # Example page ID, might need to pre-populate DB for real test
+    page_id = "deepsolv" 
     response = client.get(f"/pages/{page_id}")
     assert response.status_code == 200
     assert response.json()["page_id"] == page_id
