@@ -52,20 +52,6 @@ def clean_url(url: str) -> Optional[str]:
             return actual_url
         except:
             pass
-    
-    # Fix various LinkedIn URL formats
-    if url.startswith('https://www.linkedin.comhttps://'):
-        url = url.replace('https://www.linkedin.comhttps://', 'https://')
-    elif url.startswith('https://in.linkedin.com'):
-        url = url.replace('https://in.linkedin.com', 'https://www.linkedin.com')
-    elif url.startswith('https://www.linkedin.com/in/'):
-        # Remove any query parameters from profile URLs
-        url = url.split('?')[0]
-    
-    # Ensure the URL is properly formatted
-    if not url.startswith(('http://', 'https://')):
-        url = 'https://' + url
-    
     return url
 
 def scrape_and_save_page(db: Session, page_id: str) -> Optional[Page]:
@@ -81,23 +67,20 @@ def scrape_and_save_page(db: Session, page_id: str) -> Optional[Page]:
         profile_picture = clean_url(scraped_data.get('profile_picture'))
         website = clean_url(scraped_data.get('website'))
 
-        # Prepare page data for database
+        # Prepare page data for database with default values for nullable fields
         page_data = {
             'page_id': page_id,
-            'linkedin_id': page_id,  # Using page_id as linkedin_id since it's the same
-            'name': scraped_data.get('name'),
+            'linkedin_id': page_id,
+            'name': scraped_data.get('name') or f"Company {page_id}",
             'url': url,
             'profile_picture': profile_picture,
             'description': scraped_data.get('description'),
             'website': website,
             'industry': scraped_data.get('industry'),
-            'followers_count': scraped_data.get('followers_count', 0),  # Default to 0 if not found
+            'followers_count': scraped_data.get('followers_count', 0),
             'head_count': scraped_data.get('head_count'),
             'specialities': scraped_data.get('specialities')
         }
-
-        # Remove None values for optional fields to avoid validation errors
-        page_data = {k: v for k, v in page_data.items() if v is not None}
 
         # Check if page exists
         db_page = get_page_by_page_id(db, page_id)
@@ -111,35 +94,38 @@ def scrape_and_save_page(db: Session, page_id: str) -> Optional[Page]:
             db_page = create_page(db, page_create_schema)
 
         # Handle posts
-        if 'posts' in scraped_data and scraped_data['posts']:
+        if scraped_data.get('posts'):
             for idx, post_data in enumerate(scraped_data['posts']):
-                # Create a placeholder user for the author if needed
-                author_user = db.query(SocialMediaUser).filter(
-                    SocialMediaUser.page_id == db_page.id,
-                    SocialMediaUser.name == "Default Page Author"
-                ).first()
-                
-                if not author_user:
-                    author_user = SocialMediaUser(
-                        linkedin_id=generate_unique_id("author", db_page.id, "default"),
-                        name="Default Page Author",
-                        page_id=db_page.id
-                    )
-                    db.add(author_user)
-                    db.flush()  # Get the ID
+                if not post_data.get('content'):
+                    continue
 
-                # Generate a unique post ID based on content and timestamp
-                post_id = generate_unique_id("post", db_page.id, post_data.get('content', ''), idx)
+                # Generate a unique post ID
+                post_id = generate_unique_id("post", db_page.id, post_data.get('content', '')[:50], idx)
                 
                 # Check if post already exists
                 existing_post = db.query(Post).filter(Post.linkedin_id == post_id).first()
-                if not existing_post:
+                if not existing_post and post_data.get('content'):
+                    # Create a default author if none exists
+                    author_user = db.query(SocialMediaUser).filter(
+                        SocialMediaUser.page_id == db_page.id,
+                        SocialMediaUser.name == "Default Page Author"
+                    ).first()
+                    
+                    if not author_user:
+                        author_user = SocialMediaUser(
+                            linkedin_id=generate_unique_id("author", db_page.id, "default"),
+                            name="Default Page Author",
+                            page_id=db_page.id
+                        )
+                        db.add(author_user)
+                        db.flush()
+
                     # Create the post
                     post_create = post_schema.PostCreate(
                         linkedin_id=post_id,
-                        content=post_data.get('content', ''),
-                        likes_count=0,  # Default values since they're not in the scraped data
-                        comments_count=0,
+                        content=post_data['content'],
+                        likes_count=post_data.get('likes_count', 0),
+                        comments_count=post_data.get('comments_count', 0),
                         page_id=db_page.id,
                         author_user_id=author_user.id
                     )
@@ -147,20 +133,23 @@ def scrape_and_save_page(db: Session, page_id: str) -> Optional[Page]:
                     db.add(db_post)
 
         # Handle employees
-        if 'employees' in scraped_data and scraped_data['employees']:
+        if scraped_data.get('employees'):
             for employee_data in scraped_data['employees']:
                 try:
-                    # Clean URLs
+                    name = employee_data.get('name')
+                    if not name:
+                        continue
+
                     profile_url = clean_url(employee_data.get('profile_url'))
                     profile_picture = clean_url(employee_data.get('profile_picture'))
-                    name = employee_data.get('name', 'Unknown Employee')
 
-                    # Generate a unique employee ID based on their name and profile URL
+                    # Generate a unique employee ID
                     employee_id = generate_unique_id("employee", db_page.id, name, profile_url or '')
 
                     # Check if employee already exists
                     existing_employee = db.query(SocialMediaUser).filter(
-                        SocialMediaUser.linkedin_id == employee_id
+                        SocialMediaUser.linkedin_id == employee_id,
+                        SocialMediaUser.page_id == db_page.id
                     ).first()
 
                     if not existing_employee:
@@ -168,28 +157,22 @@ def scrape_and_save_page(db: Session, page_id: str) -> Optional[Page]:
                         employee_data_clean = {
                             'linkedin_id': employee_id,
                             'name': name,
-                            'page_id': db_page.id
+                            'page_id': db_page.id,
+                            'profile_url': profile_url,
+                            'profile_picture': profile_picture
                         }
-                        
-                        # Only add URLs if they exist and are valid
-                        if profile_url:
-                            employee_data_clean['profile_url'] = profile_url
-                        if profile_picture:
-                            employee_data_clean['profile_picture'] = profile_picture
 
-                        # Create the employee directly without using the schema
+                        # Create the employee
                         db_employee = SocialMediaUser(**employee_data_clean)
                         db.add(db_employee)
-                        db.flush()  # Get the ID immediately
+
                 except Exception as e:
-                    print(f"Error creating employee {name}: {e}")
-                    db.rollback()  # Rollback just this employee
+                    print(f"Error creating employee {employee_data.get('name')}: {e}")
                     continue
 
         db.commit()
-        db.refresh(db_page)
         return db_page
-        
+
     except Exception as e:
         print(f"Error in scrape_and_save_page for page_id {page_id}: {e}")
         db.rollback()

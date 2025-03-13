@@ -30,4 +30,3 @@ def test_read_page_not_found():
     assert response.status_code == 404
     assert response.json() == {"detail": "Page not found or could not be scraped"}
 
-# Add more tests as needed for filters, employees, posts, etc.

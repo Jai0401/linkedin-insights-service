@@ -9,11 +9,8 @@ def create_tables():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: create tables before application starts
     create_tables()
     yield
-    # Shutdown: clean up resources if needed
-    # This code runs when the application is shutting down
 
 app = FastAPI(title="LinkedIn Insights Microservice", lifespan=lifespan)
 
